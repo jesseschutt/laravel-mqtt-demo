@@ -1,78 +1,108 @@
-<p align="center"><img src="https://res.cloudinary.com/dtfbvvkyp/image/upload/v1566331377/laravel-logolockup-cmyk-red.svg" width="400"></p>
+# Laravel / MQTT Demo Application
+For the entire story behind this setup please see the [article on my blog](https://jesseschutt.com/blog/integrating-mqtt-into-a-laravel-application) where I describe how we built a Laravel application that used MQTT to log temperature readings via simple sensors.
 
-<p align="center">
-<a href="https://travis-ci.org/laravel/framework"><img src="https://travis-ci.org/laravel/framework.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/d/total.svg" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/v/stable.svg" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/license.svg" alt="License"></a>
-</p>
+## Node Script
+    process.title = 'mqtt-demo-process-node'
+    
+    const mqtt = require('mqtt')
+    const axios = require('axios')
+    const debug = process.env.NODE_ENV !== 'production'
+    
+    let endpoint = 'https://####.test/messages'
+    
+    if(process.env.NODE_ENV === 'production') {
+        endpoint = 'https://####.com/messages'
+    }
+    
+    if(debug){
+        console.log('connecting')
+    }
+    
+    const client = mqtt.connect('mqtt://m16.cloudmqtt.com:#####', {
+        username: '####',
+        password: '####'
+    })
+    
+    client.on('connect', () => {
+        if(debug) {
+            console.log('connected')
+        }
+    
+        client.subscribe('+/your-topic',{qos:1})
+    })
+    
+    client.on('message',function(topic,message){
+        if(debug) {
+            console.log('this message :', message.toString());
+        }
+        axios.post(endpoint, {topic, message: message.toString()})
+            .then(({ data }) => {
+                if(debug) {
+                    console.log(data);
+                }
+            })
+            .catch(error => {
+                if(debug) {
+                    console.error(error);
+                }
+            });
+    });
+    
+## Laravel Forge Configuration
+We will need to stop the listener from time to time, so set up a daemon to keep `yarn mqtt-prod` running.
 
-## About Laravel
+    /home/forge/your-site.com yarn mqtt-prod
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### Deployment Script
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Include `pkill -f mqtt-demo-process-node` in the deployment script so that the mqtt script will be restarted and pick up any new information when the supervisor restarts it.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+    cd /home/forge/your-site.com
+    git pull origin master
+    composer install --no-interaction --prefer-dist --optimize-autoloader
+    echo "" | sudo -S service php7.3-fpm reload
+    
+    yarn install
+    
+    yarn production
+    
+    # This value is set at the top of the subscriber.js
+    pkill -f mqtt-demo-process-node 
+    
+    if [ -f artisan ]
+    then
+        php artisan migrate --force
+    fi
 
-## Learning Laravel
+### Artisan Command
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+This command allows the Laravel app to kill the node mqtt listener. Once the process is stopped the daemon should auto-restart `yarn mqtt-prod` and pick up any new connections.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 1500 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+    <?php
+    
+    namespace App\Console\Commands;
+    
+    use Illuminate\Console\Command;
+    use Symfony\Component\Process\Process;
+    
+    class MQTT extends Command
+    {
+        protected $signature = 'mqtt:kill-process';
+    
+        protected $description = 'Stop the overseer mqtt node process';
+    
+        public function handle()
+        {
+            $process = new Process(['pkill', '-f', 'mqtt-demo-process-node']);
+            $process->start();
+    
+            foreach ($process as $type => $data) {
+                if ($process::OUT === $type) {
+                    echo "\nRead from stdout: ".$data;
+                } else {
+                    echo "\nRead from stderr: ".$data;
+                }
+            }
+        }
+    }
 
-## Laravel Sponsors
-
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the Laravel [Patreon page](https://patreon.com/taylorotwell).
-
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Cubet Techno Labs](https://cubettech.com)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[British Software Development](https://www.britishsoftware.co)**
-- **[Webdock, Fast VPS Hosting](https://www.webdock.io/en)**
-- **[DevSquad](https://devsquad.com)**
-- [UserInsights](https://userinsights.com)
-- [Fragrantica](https://www.fragrantica.com)
-- [SOFTonSOFA](https://softonsofa.com/)
-- [User10](https://user10.com)
-- [Soumettre.fr](https://soumettre.fr/)
-- [CodeBrisk](https://codebrisk.com)
-- [1Forge](https://1forge.com)
-- [TECPRESSO](https://tecpresso.co.jp/)
-- [Runtime Converter](http://runtimeconverter.com/)
-- [WebL'Agence](https://weblagence.com/)
-- [Invoice Ninja](https://www.invoiceninja.com)
-- [iMi digital](https://www.imi-digital.de/)
-- [Earthlink](https://www.earthlink.ro/)
-- [Steadfast Collective](https://steadfastcollective.com/)
-- [We Are The Robots Inc.](https://watr.mx/)
-- [Understand.io](https://www.understand.io/)
-- [Abdel Elrafa](https://abdelelrafa.com)
-- [Hyper Host](https://hyper.host)
-- [Appoly](https://www.appoly.co.uk)
-- [OP.GG](https://op.gg)
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
